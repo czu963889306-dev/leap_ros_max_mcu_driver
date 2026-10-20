@@ -1,102 +1,58 @@
 #include "system_globals.h"
-#include "camsense_lidar.h"
+#include "board_config.h"
+#include "ldstl26_lidar.h"
+#include "network_config.h"
 #include "msg/lidar_msg.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char* TAG = "LIDAR_TASK";
+static constexpr uint16_t kInvalidObstacleDistanceMm = 100;
+namespace board_cfg = leap_config::board;
+namespace net_cfg = leap_config::network;
 
 void lidar_task(void *p) {
-
-    CamsenseLidar* lidar = new CamsenseLidar(
-
-        UART_NUM_1,
-
-        (gpio_num_t)UART_PIN_NO_CHANGE,
-
-        GPIO_NUM_41,
-
-        115200
-
+    Ldstl26Lidar* lidar = new Ldstl26Lidar(
+        net_cfg::kLidarUartPort,
+        board_cfg::kLidarTxPin,
+        board_cfg::kLidarRxPin,
+        net_cfg::kLidarBaudRate
     );
-
-
 
     lidar->Init();
 
-
-
     static LidarPoint full_scan_data[MAX_LIDAR_POINTS_PER_SCAN];
-
     uint16_t scan_point_count = 0;
-
     LidarMsg lidar_msg;
 
-
-
-    ESP_LOGI(TAG, "Lidar task started on UART1, RX=41");
-
-
+    ESP_LOGI(TAG, "Lidar task started on UART%d, RX=%d",
+             static_cast<int>(net_cfg::kLidarUartPort),
+             static_cast<int>(board_cfg::kLidarRxPin));
 
     while (1) {
-
-        bool parsed_lidar_data = lidar->Poll(full_scan_data, &scan_point_count);
-
-
-
-        if (parsed_lidar_data) {
-
-            memset(&lidar_msg, 0, sizeof(LidarMsg));
-
-
+        if (lidar->Poll(full_scan_data, &scan_point_count)) {
+            memset(&lidar_msg, 0, sizeof(lidar_msg));
 
             for (int i = 0; i < scan_point_count; i++) {
-
-                int angle_deg = (int)(full_scan_data[i].angle + 0.5f);
-
-
-
-                if (angle_deg >= 360) angle_deg -= 360;
-
-                if (angle_deg < 0) angle_deg = 0;
-
-
-
-                // 左右镜像
-
-                angle_deg = (360 - angle_deg) % 360;
-
-
-
+                int angle = (int)full_scan_data[i].angle;
                 uint16_t dist = (uint16_t)full_scan_data[i].distance;
+                // 从车顶向下看，安装方向相对原来顺时针旋转 90°。
+                // ROS 角度逆时针为正：原有 180° 偏置减去 90°，保留方向镜像。
+                angle = (90 - angle + 360) % 360;
 
-
-
-                if (dist > 0) {
-
-                    if (lidar_msg.distances[angle_deg] == 0 ||
-
-                        dist < lidar_msg.distances[angle_deg]) {
-
-                        lidar_msg.distances[angle_deg] = dist;
-
+                // 10 cm 以内的障碍物视为无效点，不写入扫描数据。
+                if (dist > kInvalidObstacleDistanceMm) {
+                    if (lidar_msg.distances[angle] == 0 ||
+                        dist < lidar_msg.distances[angle]) {
+                        lidar_msg.distances[angle] = dist;
                     }
-
                 }
-
             }
-
-
-
-            xQueueOverwrite(q_lidar_state, &lidar_msg);
-            g_lidar_scan_sequence = g_lidar_scan_sequence + 1;
-
+            xQueueOverwrite(system_globals().queues.lidar_state, &lidar_msg);
+            system_globals().flags.lidar_scan_sequence =
+                system_globals().flags.lidar_scan_sequence + 1;
         }
 
-
-
-        vTaskDelay(pdMS_TO_TICKS(10));
-
+        vTaskDelay(pdMS_TO_TICKS(net_cfg::kLidarTaskPeriodMs));
     }
-
 }

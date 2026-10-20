@@ -46,7 +46,7 @@ float PidController::Calculate(float setpoint, float measured_value, float dt) {
     float i_term = ki_ * integral_;
 
     output = p_term + i_term + d_term;
-    
+
     // 计算对于位置式而言的等效 delta（方便统一接口调用）
     last_delta_ = output - current_output_;
     previous_error_ = error;
@@ -72,7 +72,7 @@ float PidController::Calculate(float setpoint, float measured_value, float dt) {
   // 限幅后修正 last_delta_，确保获取的增量与实际受限输出匹配
   if (mode_ == PidMode::kIncremental) {
       // 增量修正：实际输出变化量 = 限幅后的输出 - 之前的输出
-      last_delta_ = current_output_ - (output - last_delta_); 
+      last_delta_ = current_output_ - (output - last_delta_);
   }
 
   return current_output_;
@@ -94,7 +94,7 @@ void PidController::SetGains(float kp, float ki, float kd) {
   kp_ = kp;
   ki_ = ki;
   kd_ = kd;
-  Reset(); 
+  Reset();
 }
 
 void PidController::SetOutputLimits(float min_output, float max_output) {

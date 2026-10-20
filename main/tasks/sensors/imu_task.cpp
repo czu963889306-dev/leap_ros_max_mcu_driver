@@ -21,15 +21,15 @@ void imu_task(void *p) {
         msg.gyro_y = imu.GetGyroY();
         msg.gyro_z = imu.GetGyroZ();
 
-        xQueueOverwrite(q_imu_state, &msg);
+        xQueueOverwrite(system_globals().queues.imu_state, &msg);
 
         // 【新增】：降频打印 Yaw 角 (25 * 20ms = 500ms 打印一次)
         // if (++print_counter >= 5) {
         //     // 如果你的 IMU 吐出的是弧度，可以自行加备注
-        //     ESP_LOGI("IMU_TASK", "Current Yaw: %.2f", msg.yaw); 
+        //     ESP_LOGI("IMU_TASK", "Current Yaw: %.2f", msg.yaw);
         //     print_counter = 0; // 计数器清零
         // }
 
-        vTaskDelay(pdMS_TO_TICKS(20)); 
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

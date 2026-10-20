@@ -17,16 +17,16 @@ typedef struct {
     int joy2_y;
 } control_data_t;
 
-// 将摇杆 ADC 值 (0~4095, 中值 2048) 映射为实际速度
+// 将摇杆原始值 (0~4095, 中值 2048) 映射为实际速度
 // 带有死区(Deadzone)处理，防止摇杆不回中导致机器人漂移
-static float map_joystick_to_velocity(int raw_adc, float max_velocity) {
-    int offset = raw_adc - 2048;
-    
+static float map_joystick_to_velocity(int raw_value, float max_velocity) {
+    int offset = raw_value - 2048;
+
     // 设置摇杆死区，比如偏移量在 150 以内算作中心点
     if (abs(offset) < 200) {
         return 0.0f;
     }
-    
+
     // 线性映射到 -max_velocity ~ +max_velocity
     return (float)offset / 2048.0f * max_velocity;
 }
@@ -39,12 +39,12 @@ static void on_espnow_recv(const esp_now_recv_info_t *esp_now_info, const uint8_
 
         MotionMsg cmd_msg = {};
         cmd_msg.source = MOTION_SRC_ESPNOW;
-        
+
         // 【重要】你需要根据实际物理摇杆的方向，在这里决定是否加负号
         // 假设最大线速度为 1.0 m/s，最大角速度为 3.14 rad/s (可按需修改)
         // 假设 Joy1_Y 控制前后 (X轴)，Joy1_X 控制左右平移 (Y轴)，Joy2_X 控制自转 (Wz)
-        cmd_msg.target_vx = map_joystick_to_velocity(recv_data.joy1_y, 100.0f); 
-        // cmd_msg.target_vy = -map_joystick_to_velocity(recv_data.joy1_x, 100.0f); 
+        cmd_msg.target_vx = map_joystick_to_velocity(recv_data.joy1_y, 100.0f);
+        // cmd_msg.target_vy = -map_joystick_to_velocity(recv_data.joy1_x, 100.0f);
 
         // 注意：角速度 (wz) 的单位通常是 rad/s。
         // 如果你的底盘运动学解算也将自转 (wz) 当作类似 RPM 的缩放系数来处理，
@@ -52,8 +52,8 @@ static void on_espnow_recv(const esp_now_recv_info_t *esp_now_info, const uint8_
         cmd_msg.target_wz = -map_joystick_to_velocity(recv_data.joy2_y, 100.0f);
 
         // 将指令覆盖写入全局运动控制队列
-        if (q_motion_cmd != nullptr) {
-            xQueueOverwrite(q_motion_cmd, &cmd_msg);
+        if (system_globals().queues.motion_cmd != nullptr) {
+            xQueueOverwrite(system_globals().queues.motion_cmd, &cmd_msg);
         }
     } else {
         ESP_LOGW(TAG, "收到未知大小数据包: %d 字节", data_len);

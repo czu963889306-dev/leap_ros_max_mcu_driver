@@ -15,7 +15,7 @@ enum class PidMode {
 class PidController {
  public:
   // 构造函数
-  PidController(PidMode mode, float kp, float ki, float kd, 
+  PidController(PidMode mode, float kp, float ki, float kd,
                 float min_output, float max_output);
 
   ~PidController() = default;

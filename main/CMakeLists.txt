@@ -4,16 +4,25 @@ set(APP_SRCS
     "config/pid_config.cpp"
     "core/system_globals.cpp"
     "platform/board.cpp"
+    "control/differential_kinematics.cpp"
+    "control/mecanum_kinematics.cpp"
     "control/motion_controller.cpp"
     "tasks/control/motion_task.cpp"
     "tasks/sensors/imu_task.cpp"
-    "tasks/sensors/ultrasonic_task.cpp"
     "tasks/sensors/battery_task.cpp"
+    "tasks/sensors/ultrasonic_task.cpp"
     "tasks/sensors/lidar_task.cpp"
     "tasks/io/peripheral_task.cpp"
     "tasks/io/gamepad_i2c_task.cpp"
-    "tasks/network/wifi_provision_task.cpp"
-    "tasks/network/microros_task.cpp"
+    "tasks/network/provision/wifi_provision_task.cpp"
+    "tasks/network/provision/provision_portal.cpp"
+    "tasks/network/microros/microros_state.cpp"
+    "tasks/network/microros/microros_transport.cpp"
+    "tasks/network/microros/microros_subscribers.cpp"
+    "tasks/network/microros/microros_services.cpp"
+    "tasks/network/microros/microros_publishers.cpp"
+    "tasks/network/microros/microros_runtime.cpp"
+    "tasks/network/microros/microros_task.cpp"
     "network/wifi_app.cpp"
 )
 
@@ -28,6 +37,8 @@ idf_component_register(
         "msg"
         "network"
         "tasks/network"
+        "tasks/network/microros"
+        "tasks/network/provision"
         "../components/i2c_bus_lock"
     REQUIRES
         esp_http_server
@@ -39,16 +50,15 @@ idf_component_register(
         lwip
         motor_driver
         encoder_driver
+        battery_adc
         ultrasonic_sensor
+        ws2812_driver
         button_driver
-        servo_driver
         lsm6ds3_driver
         pid_controller
-        camsense_lidar
+        ldstl26_lidar
         status_led
-        battery_adc
         camera_i2c_client
         i2c_bus_lock
         micro_ros_espidf_component
-        esp_driver_uart
 )

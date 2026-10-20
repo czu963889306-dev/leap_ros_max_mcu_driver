@@ -10,24 +10,28 @@
 static const char *TAG = "BATTERY_ADC";
 static constexpr adc_atten_t kBatteryAdcAtten = ADC_ATTEN_DB_12;
 static constexpr adc_bitwidth_t kBatteryAdcBitwidth = ADC_BITWIDTH_DEFAULT;
-// Hardware divider: 8.4V battery reads 2.6857V at GPIO3, with 0.0574mA divider leak.
-// The measured divider ratio is used directly; 1% resistor tolerance remains measurement tolerance.
-static constexpr float kDividerRatio = 8.4f / 2.6857f;
-static constexpr float kBatteryEmptyVoltage = 6.0f;
-static constexpr float kBatteryFullVoltage = 8.4f;
 static constexpr int kSampleCount = 16;
 
-BatteryAdc::BatteryAdc(adc_unit_t unit, adc_channel_t channel)
+BatteryAdc::BatteryAdc(adc_unit_t unit, adc_channel_t channel, float divider_ratio,
+                      float empty_voltage_v, float full_voltage_v)
     : unit_(unit),
       channel_(channel),
+      divider_ratio_(divider_ratio),
+      empty_voltage_v_(empty_voltage_v),
+      full_voltage_v_(full_voltage_v),
       unit_handle_(nullptr),
       cali_handle_(nullptr),
-      initialized_(false),
-      calibrated_(false) {}
+      initialized_(false) {}
 
 esp_err_t BatteryAdc::Init() {
   if (initialized_) {
     return ESP_OK;
+  }
+  if (!isfinite(divider_ratio_) || divider_ratio_ <= 1.0f ||
+      !isfinite(empty_voltage_v_) || !isfinite(full_voltage_v_) ||
+      empty_voltage_v_ <= 0.0f || full_voltage_v_ <= empty_voltage_v_) {
+    ESP_LOGE(TAG, "invalid battery divider or voltage range");
+    return ESP_ERR_INVALID_ARG;
   }
 
   adc_oneshot_unit_init_cfg_t unit_config = {};
@@ -45,6 +49,8 @@ esp_err_t BatteryAdc::Init() {
       unit_handle_, channel_, &channel_config);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "failed to configure ADC channel: %s", esp_err_to_name(err));
+    adc_oneshot_del_unit(unit_handle_);
+    unit_handle_ = nullptr;
     return err;
   }
 
@@ -54,14 +60,16 @@ esp_err_t BatteryAdc::Init() {
   cali_config.atten = kBatteryAdcAtten;
   cali_config.bitwidth = kBatteryAdcBitwidth;
   err = adc_cali_create_scheme_curve_fitting(&cali_config, &cali_handle_);
-  calibrated_ = (err == ESP_OK);
-  if (!calibrated_) {
-    ESP_LOGW(TAG, "ADC calibration unavailable: %s", esp_err_to_name(err));
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "ADC calibration unavailable: %s", esp_err_to_name(err));
+    adc_oneshot_del_unit(unit_handle_);
+    unit_handle_ = nullptr;
+    return err;
   }
 
   initialized_ = true;
   ESP_LOGI(TAG, "battery ADC initialized on unit %d channel %d, ratio %.4f",
-           static_cast<int>(unit_), static_cast<int>(channel_), kDividerRatio);
+           static_cast<int>(unit_), static_cast<int>(channel_), divider_ratio_);
   return ESP_OK;
 }
 
@@ -83,13 +91,9 @@ BatteryAdcReading BatteryAdc::Read() {
     }
 
     int mv = 0;
-    if (calibrated_) {
-      err = adc_cali_raw_to_voltage(cali_handle_, raw, &mv);
-      if (err != ESP_OK) {
-        continue;
-      }
-    } else {
-      mv = static_cast<int>(lroundf((static_cast<float>(raw) / 4095.0f) * 3300.0f));
+    err = adc_cali_raw_to_voltage(cali_handle_, raw, &mv);
+    if (err != ESP_OK) {
+      continue;
     }
 
     raw_sum += raw;
@@ -103,7 +107,7 @@ BatteryAdcReading BatteryAdc::Read() {
 
   reading.raw = raw_sum / valid_samples;
   reading.adc_voltage_v = static_cast<float>(mv_sum) / static_cast<float>(valid_samples) / 1000.0f;
-  reading.battery_voltage_v = reading.adc_voltage_v * kDividerRatio;
+  reading.battery_voltage_v = reading.adc_voltage_v * divider_ratio_;
   reading.percentage = static_cast<uint8_t>(lroundf(EstimatePercentage(reading.battery_voltage_v)));
   reading.valid = true;
   return reading;
@@ -111,8 +115,8 @@ BatteryAdcReading BatteryAdc::Read() {
 
 float BatteryAdc::EstimatePercentage(float battery_voltage_v) const {
   const float pct =
-      ((battery_voltage_v - kBatteryEmptyVoltage) /
-       (kBatteryFullVoltage - kBatteryEmptyVoltage)) *
+      ((battery_voltage_v - empty_voltage_v_) /
+       (full_voltage_v_ - empty_voltage_v_)) *
       100.0f;
   if (pct < 0.0f) {
     return 0.0f;

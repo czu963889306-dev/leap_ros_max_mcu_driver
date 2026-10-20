@@ -13,10 +13,10 @@ class QuadratureEncoder {
   ~QuadratureEncoder();
 
   void Init();
-  
+
   // 获取当前累计的绝对脉冲数 (32位无溢出)
   int32_t GetCount();
-  
+
   // 重置脉冲计数
   void ResetCount();
 

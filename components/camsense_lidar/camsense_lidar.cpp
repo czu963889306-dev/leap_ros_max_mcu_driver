@@ -33,28 +33,28 @@ void CamsenseLidar::Init() {
 bool CamsenseLidar::Poll(LidarPoint* out_scan, uint16_t* out_count) {
     size_t available = 0;
     uart_get_buffered_data_len(uart_num_, &available);
-    
+
     if (available == 0) {
         return false;
     }
 
     // 限制单次最大读取量，确保不会霸占 CPU（留时间给系统喂狗）
     if (available > 512) {
-        available = 512; 
+        available = 512;
     }
 
     uint8_t rx_buf[512];
     int read_len = uart_read_bytes(uart_num_, rx_buf, available, 0);
-    
+
     bool circle_completed = false;
-    
+
     // 在内存中极速跑状态机
     for (int i = 0; i < read_len; i++) {
         if (ProcessByte(rx_buf[i], out_scan, out_count)) {
             circle_completed = true;
         }
     }
-    
+
     return circle_completed;
 }
 
@@ -65,7 +65,7 @@ bool CamsenseLidar::ProcessByte(uint8_t rx_byte, LidarPoint* out_scan, uint16_t*
         if (rx_byte == 0x55) state_ = 1;
     } else if (state_ == 1) {
         if (rx_byte == 0xAA) state_ = 2;
-        else if (rx_byte == 0x55) state_ = 1; 
+        else if (rx_byte == 0x55) state_ = 1;
         else state_ = 0;
     } else if (state_ == 2) {
         cInfo_ = rx_byte;
@@ -73,7 +73,7 @@ bool CamsenseLidar::ProcessByte(uint8_t rx_byte, LidarPoint* out_scan, uint16_t*
     } else if (state_ == 3) {
         N_ = rx_byte;
         expected_payload_len_ = N_ * cInfo_ + 8;
-        
+
         // 【终极安全校验】：彻底封死脏数据！
         // Camsense协议 cInfo 必须是 2 (部分型号是3)，且单包点数 N_ 不可能超过 60
         if (expected_payload_len_ > MAX_LIDAR_PACKET_SIZE || cInfo_ == 0 || N_ > 60 || N_ == 0) {
@@ -84,7 +84,7 @@ bool CamsenseLidar::ProcessByte(uint8_t rx_byte, LidarPoint* out_scan, uint16_t*
         }
     } else if (state_ == 4) {
         payload_buffer_[payload_idx_++] = rx_byte;
-        
+
         if (payload_idx_ >= expected_payload_len_) {
             // 将数组稍微开大一点留足余量
             LidarPoint packet_points[80];
@@ -99,20 +99,20 @@ bool CamsenseLidar::ProcessByte(uint8_t rx_byte, LidarPoint* out_scan, uint16_t*
                         *out_count = current_point_count_;
                     }
                     circle_completed = true;
-                    current_point_count_ = 0; 
+                    current_point_count_ = 0;
                 }
 
                 if (current_point_count_ < MAX_LIDAR_POINTS_PER_SCAN) {
                     current_scan_[current_point_count_] = pt;
                     current_point_count_++;
                 }
-                
+
                 last_angle_ = pt.angle;
             }
-            state_ = 0; 
+            state_ = 0;
         }
     }
-    
+
     return circle_completed;
 }
 
@@ -129,20 +129,20 @@ uint8_t CamsenseLidar::ParsePacket(const uint8_t* buffer, uint8_t cInfo, uint8_t
     for (int i = 0; i < N; i++) {
         int idx = 4 + i * cInfo;
         uint16_t dist = 0;
-        uint8_t flag = 1; 
+        uint8_t flag = 1;
 
-        if (cInfo == 0x02) { 
+        if (cInfo == 0x02) {
             dist = ((buffer[idx + 1] & 0x3F) << 8) | buffer[idx];
             flag = (buffer[idx + 1] >> 7) & 0x01;
         }
 
-        if (dist == 0) flag = 1; 
+        if (dist == 0) flag = 1;
 
-        if (flag == 0) {  
+        if (flag == 0) {
             float angle = FA + dAngle * i + center_base_angle_;
             while (angle < 0.0f) angle += 360.0f;
             while (angle >= 360.0f) angle -= 360.0f;
-            
+
             // 【硬性边界保护】：防止哪怕逃过前面校验的脏数据越界
             if (valid_count < 80) {
                 packet_points[valid_count].angle = angle;

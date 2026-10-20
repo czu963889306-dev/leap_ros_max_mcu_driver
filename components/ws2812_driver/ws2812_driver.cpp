@@ -21,7 +21,7 @@ void Ws2812Driver::Init() {
 
   // 3. 安装并初始化设备
   ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip_));
-  
+
   // 初始化后默认清空（熄灭）
   Clear();
 }

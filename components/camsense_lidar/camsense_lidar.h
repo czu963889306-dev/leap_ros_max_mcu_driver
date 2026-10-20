@@ -9,8 +9,8 @@
 #define MAX_LIDAR_PACKET_SIZE 128
 
 struct LidarPoint {
-    float angle;    
-    float distance; 
+    float angle;
+    float distance;
 };
 
 class CamsenseLidar {
@@ -30,8 +30,8 @@ class CamsenseLidar {
   uint8_t cInfo_;
   uint8_t N_;
   float last_angle_;
-  
-  const float center_base_angle_ = 18.5f; 
+
+  const float center_base_angle_ = 18.5f;
 
   LidarPoint current_scan_[MAX_LIDAR_POINTS_PER_SCAN];
   uint16_t current_point_count_;

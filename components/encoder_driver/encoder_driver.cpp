@@ -31,25 +31,16 @@ void QuadratureEncoder::Init() {
 
   ESP_LOGI(TAG, "Initializing PCNT on pins %d and %d", pin_a_, pin_b_);
 
-  // Hall encoders are commonly open-drain/open-collector outputs.  Keep the
-  // inputs at a defined 3.3 V level when an external pull-up is absent.  The
-  // internal pull-up is intentionally only a fallback; a 4.7 kOhm external
-  // pull-up close to the ESP32 is still preferred in a noisy motor system.
-  ESP_ERROR_CHECK(gpio_set_pull_mode(pin_a_, GPIO_PULLUP_ONLY));
-  ESP_ERROR_CHECK(gpio_set_pull_mode(pin_b_, GPIO_PULLUP_ONLY));
-
   // 1. 配置 PCNT 单元 (Unit)
   pcnt_unit_config_t unit_config = {};
   unit_config.low_limit = -30000;   // 【修改这里】改为对称下限
   unit_config.high_limit = 30000;   // 【修改这里】改为对称上限
-  
+
   ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit_));
 
   // 2. 设置硬件毛刺滤波器 (极大提升抗干扰能力)
   pcnt_glitch_filter_config_t filter_config = {};
-  // 5764 counts/rev still leaves a wide margin at the expected wheel speed,
-  // while rejecting more brush/PWM spikes than the previous 1 us setting.
-  filter_config.max_glitch_ns = 2000;
+  filter_config.max_glitch_ns = 1000; // 过滤 1微秒 (1000ns) 以下的短跳变
   ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit_, &filter_config));
 
   // 3. 实例化两个通道 (Channel A 和 Channel B)
@@ -67,15 +58,15 @@ void QuadratureEncoder::Init() {
 
   // 4. 设置硬件四倍频 (4X Quadrature) 逻辑
   // A相：当A跳变时，根据B相的电平决定加还是减
-  ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_a, 
+  ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_a,
       PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
-  ESP_ERROR_CHECK(pcnt_channel_set_level_action(pcnt_chan_a, 
+  ESP_ERROR_CHECK(pcnt_channel_set_level_action(pcnt_chan_a,
       PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
   // B相：当B跳变时，根据A相的电平决定加还是减
-  ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_b, 
+  ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_b,
       PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
-  ESP_ERROR_CHECK(pcnt_channel_set_level_action(pcnt_chan_b, 
+  ESP_ERROR_CHECK(pcnt_channel_set_level_action(pcnt_chan_b,
       PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
   // 5. 启用、清零并启动 PCNT 硬件
@@ -99,10 +90,10 @@ int32_t QuadratureEncoder::GetCount() {
   // 当硬件计数器到达 30000 时，下一个脉冲会把它变成 0，跨度为 30001
   if (delta < -15000) {
     // 如果算出来的差值是个极大的负数（比如从 29990 突然变成 10），说明发生了正向溢出归零
-    delta += 30001; 
+    delta += 30001;
   } else if (delta > 15000) {
     // 如果算出来的差值是个极大的正数（比如从 -29990 突然变成 -10），说明发生了反向溢出归零
-    delta -= 30001; 
+    delta -= 30001;
   }
 
   // 累加真实的物理脉冲增量

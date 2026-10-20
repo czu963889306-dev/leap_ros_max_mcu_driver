@@ -16,7 +16,7 @@ class Lsm6ds3Imu {
 
   // 读取传感器数据并执行互补滤波更新姿态 (修改点：内部增加了零偏补偿和死区)
   esp_err_t Update();
-  
+
   // 一次性获取四元数 (w, x, y, z)
   void GetQuaternion(float &w, float &x, float &y, float &z) const {
     w = q_w_; x = q_x_; y = q_y_; z = q_z_;

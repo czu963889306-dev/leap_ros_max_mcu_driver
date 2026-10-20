@@ -19,7 +19,7 @@
 #include "msg/lidar_msg.h"
 #include "msg/motion_msg.h"
 #include "msg/pid_msg.h"
-#include "msg/servo_msg.h"
+#include "msg/rgb_msg.h"
 #include "msg/temperature_msg.h"
 #include "msg/ultrasonic_msg.h"
 #include "nvs_flash.h"
@@ -43,6 +43,13 @@ static void start_comm_task(void) {
         return;
     }
 
+    if (system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRos &&
+        system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRosUart) {
+        ESP_LOGW(TAG, "Unknown communication mode: %s",
+                 SystemGlobals::WifiCommModeToRuntimeValue(system_globals().runtime.wifi_comm_mode));
+        return;
+    }
+
     if (xTaskCreate(microros_task, "microros", 12288, NULL, 4, NULL) == pdPASS) {
         s_comm_task_started = true;
         ESP_LOGI(TAG, "micro-ROS task started");
@@ -52,16 +59,16 @@ static void start_comm_task(void) {
 }
 
 static void wifi_start_task(void *p) {
-    const bool sta_connected = wifi_init_sta();
+    const bool sta_connected = wifi_app().InitSta();
     if (!sta_connected) {
-        wifi_init_softap();
+        wifi_app().InitSoftAp();
         status_led.SetMode(StatusLedMode::kFastBlink);
     }
 
     xTaskCreate(wifi_provision_task, "wifi_provision", 6144, NULL, 3, NULL);
-    if (sta_connected && g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
+    if (sta_connected && system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRosUart) {
         start_comm_task();
-    } else if (!sta_connected && g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
+    } else if (!sta_connected && system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRosUart) {
         ESP_LOGW(TAG, "STA not connected; communication task is not started");
     }
 
@@ -72,47 +79,49 @@ static void wifi_start_task(void *p) {
 static void init_device_name(void) {
     uint8_t mac[6] = {0};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        snprintf(g_device_name, sizeof(g_device_name), "Maturo_UNKNOWN");
+        snprintf(system_globals().runtime.device_name, sizeof(system_globals().runtime.device_name), "Maturo_UNKNOWN");
         ESP_LOGW(TAG, "Failed to read STA MAC, using fallback device name");
         return;
     }
 
     snprintf(
-        g_device_name,
-        sizeof(g_device_name),
+        system_globals().runtime.device_name,
+        sizeof(system_globals().runtime.device_name),
         "Maturo_%02X%02X%02X%02X%02X%02X",
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
 static void init_runtime_config(void) {
     WifiRuntimeConfig config = {};
-    esp_err_t err = wifi_load_runtime_config(&config);
+    esp_err_t err = wifi_app().LoadRuntimeConfig(&config);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to load runtime config, using defaults: %s",
                  esp_err_to_name(err));
     }
 
-    g_wifi_comm_mode = config.comm_mode;
-    snprintf(g_microros_agent_ip, sizeof(g_microros_agent_ip), "%s",
+    system_globals().runtime.wifi_comm_mode = config.comm_mode;
+    system_globals().runtime.chassis_type = config.chassis_type;
+    snprintf(system_globals().runtime.microros_agent_ip, sizeof(system_globals().runtime.microros_agent_ip), "%s",
              config.microros_agent_ip);
-    g_microros_agent_port = config.microros_agent_port;
+    system_globals().runtime.microros_agent_port = config.microros_agent_port;
 
-    ESP_LOGI(TAG, "Runtime config: comm=%s, micro-ROS agent=%s:%u",
-             wifi_comm_mode_to_runtime_value(g_wifi_comm_mode),
-             g_microros_agent_ip,
-             static_cast<unsigned>(g_microros_agent_port));
+    ESP_LOGI(TAG, "Runtime config: comm=%s, chassis=%s, micro-ROS agent=%s:%u",
+             SystemGlobals::WifiCommModeToRuntimeValue(system_globals().runtime.wifi_comm_mode),
+             SystemGlobals::ChassisTypeToRuntimeValue(system_globals().runtime.chassis_type),
+             system_globals().runtime.microros_agent_ip,
+             static_cast<unsigned>(system_globals().runtime.microros_agent_port));
 }
 
 static void init_pid_config(void) {
-    PidMsg speed_pid = g_speed_pid_state;
+    PidMsg speed_pid = system_globals().control.speed_pid;
     esp_err_t err = pid_load_speed_config(&speed_pid);
     if (err == ESP_OK) {
-        g_speed_pid_state = speed_pid;
+        system_globals().control.speed_pid = speed_pid;
         ESP_LOGI(TAG, "Speed PID config: kp=%.3f, ki=%.3f, kd=%.3f",
                  speed_pid.kp, speed_pid.ki, speed_pid.kd);
     } else if (err == ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGI(TAG, "Speed PID config not found, using defaults: kp=%.3f, ki=%.3f, kd=%.3f",
-                 g_speed_pid_state.kp, g_speed_pid_state.ki, g_speed_pid_state.kd);
+                 system_globals().control.speed_pid.kp, system_globals().control.speed_pid.ki, system_globals().control.speed_pid.kd);
     } else {
         ESP_LOGW(TAG, "Failed to load speed PID config, using defaults: %s",
                  esp_err_to_name(err));
@@ -120,20 +129,21 @@ static void init_pid_config(void) {
 }
 
 static void create_runtime_queues(void) {
-    q_imu_state = xQueueCreate(1, sizeof(ImuMsg));
-    q_motion_state = xQueueCreate(1, sizeof(MotionMsg));
-    q_ultrasonic_state = xQueueCreate(1, sizeof(UltrasonicMsg));
-    q_lidar_state = xQueueCreate(1, sizeof(LidarMsg));
-    q_gamepad_state = xQueueCreate(1, sizeof(GamepadMsg));
-    q_temperature_state = xQueueCreate(1, sizeof(TemperatureMsg));
-    q_battery_state = xQueueCreate(1, sizeof(BatteryMsg));
-    q_motion_cmd = xQueueCreate(1, sizeof(MotionMsg));
-    q_servo_cmd = xQueueCreate(1, sizeof(ServoMsg));
-    q_speedpid_cmd = xQueueCreate(1, sizeof(PidMsg));
-    if (q_speedpid_cmd != nullptr) {
-        xQueueOverwrite(q_speedpid_cmd, &g_speed_pid_state);
+    system_globals().queues.imu_state = xQueueCreate(1, sizeof(ImuMsg));
+    system_globals().queues.battery_state = xQueueCreate(1, sizeof(BatteryMsg));
+    configASSERT(system_globals().queues.battery_state != nullptr);
+    system_globals().queues.motion_state = xQueueCreate(1, sizeof(MotionMsg));
+    system_globals().queues.ultrasonic_state = xQueueCreate(1, sizeof(UltrasonicMsg));
+    system_globals().queues.lidar_state = xQueueCreate(1, sizeof(LidarMsg));
+    system_globals().queues.gamepad_state = xQueueCreate(1, sizeof(GamepadMsg));
+    system_globals().queues.temperature_state = xQueueCreate(1, sizeof(TemperatureMsg));
+    system_globals().queues.motion_cmd = xQueueCreate(1, sizeof(MotionMsg));
+    system_globals().queues.gamepad_motion_cmd = xQueueCreate(1, sizeof(MotionMsg));
+    system_globals().queues.rgb_cmd = xQueueCreate(1, sizeof(RgbMsg));
+    system_globals().queues.speedpid_cmd = xQueueCreate(1, sizeof(PidMsg));
+    if (system_globals().queues.speedpid_cmd != nullptr) {
+        xQueueOverwrite(system_globals().queues.speedpid_cmd, &system_globals().control.speed_pid);
     }
-    q_postionpid_cmd = xQueueCreate(1, sizeof(PidMsg));
 }
 
 void app_runtime_startup(void) {
@@ -161,13 +171,18 @@ void app_runtime_startup(void) {
 
     create_runtime_queues();
 
-    // xTaskCreate(imu_task, "imu", 4096, NULL, 5, NULL);
+    xTaskCreate(imu_task, "imu", 4096, NULL, 5, NULL);
+    if (xTaskCreate(battery_task, "battery", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start battery task");
+    }
     xTaskCreate(motion_task, "motion", 4096, NULL, 5, NULL);
-    xTaskCreate(ultrasonic_task, "ultrasonic", 4096, NULL, 4, NULL);
-    xTaskCreate(battery_task, "battery", 4096, NULL, 4, NULL);
+    // xTaskCreate(ultrasonic_task, "ultrasonic", 4096, NULL, 4, NULL);
     xTaskCreate(peripheral_task, "peripheral", 4096, NULL, 3, NULL);
+    if (xTaskCreate(gamepad_i2c_task, "gamepad_i2c", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start gamepad I2C task");
+    }
     xTaskCreate(lidar_task, "lidar", 8192, NULL, 4, NULL);
-    if (g_wifi_comm_mode == WifiCommMode::kMicroRosUart) {
+    if (system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRosUart) {
         start_comm_task();
     }
     xTaskCreate(camera_task, "camera_task", 4096, NULL, 3, NULL);

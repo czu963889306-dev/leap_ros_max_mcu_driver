@@ -4,37 +4,38 @@
 #include "motor_driver.h"
 #include "encoder_driver.h"
 #include "pid_controller.h"
+#include "differential_kinematics.h"
+#include "mecanum_kinematics.h"
+#include "motion_kinematics.h"
 
-enum class ControlMode { kVelocity, kPosition, kRelativeSeq };
-enum class SeqState { kIdle, kForward, kSettle, kTurn };
+enum class ControlMode { kVelocity, kDirectPwm };
+enum class ChassisType : uint8_t { kMecanum = 0, kDifferential = 1 };
 
 enum class MotorID {
-  kLeft = 0,
-  kRight = 1,
+  kFrontLeft = 0, kFrontRight = 1, kBackLeft = 2, kBackRight = 3
 };
 
 class MotionController {
  public:
-  MotionController(Tb6612Motor& left_motor, Tb6612Motor& right_motor,
-                   QuadratureEncoder& left_encoder, QuadratureEncoder& right_encoder);
-                   
-  int16_t ApplyDeadband(float target_vel, float measured_vel, float pid_output);
+  MotionController(At8236Motor& fl, At8236Motor& fr, At8236Motor& bl, At8236Motor& br,
+                   QuadratureEncoder& enc_fl, QuadratureEncoder& enc_fr,
+                   QuadratureEncoder& enc_bl, QuadratureEncoder& enc_br);
+
+  int16_t ApplyDeadband(float target_vel, float pid_output);
+  void SetChassisType(ChassisType type);
   void SetMaxAcceleration(float accel_mms2);
-  void MoveToPosition(float target_x, float target_y, float target_yaw);
-  void MoveRelative(float distance_mm, float angle_deg);
-  bool IsBusy() const { return control_mode_ == ControlMode::kRelativeSeq && seq_state_ != SeqState::kIdle; }
-  
+
   void GetOdometry(float* x, float* y, float* yaw) const;
   void GetOdometryQuaternion(float* qw, float* qx, float* qy, float* qz) const;
   float GetTotalDistance() const; // 新增：获取小车真实走过的总轨迹路程
   void ResetOdometry();
-  
-  void SetPositionPidGains(float kp, float ki, float kd);
 
   void SetMotorTargetVelocity(MotorID motor_id, float target_mms);
-  void SetAllMotorTargetsVelocity(float left_mms, float right_mms);
+  void SetAllMotorTargetsVelocity(float fl_mms, float fr_mms, float bl_mms, float br_mms);
+  void SetMotorTargetPwm(MotorID motor_id, int16_t pwm);
+  void SetAllMotorTargetsPwm(int16_t fl_pwm, int16_t fr_pwm, int16_t bl_pwm, int16_t br_pwm);
   float GetMotorVelocity(MotorID motor_id) const;
-  void GetAllMotorVelocities(float* left_mms, float* right_mms) const;
+  void GetAllMotorVelocities(float* fl_mms, float* fr_mms, float* bl_mms, float* br_mms) const;
 
   void Drive(float linear_x, float linear_y, float angular_z);
   void GetVelocity(float* linear_x, float* linear_y, float* angular_z) const;
@@ -44,38 +45,34 @@ class MotionController {
 
  private:
   void CalculateKinematics(float linear_x, float linear_y, float angular_z);
+  void SelectKinematics();
+  float WheelRpmToMmS(float wheel_rpm) const;
+  float MmSToWheelRpm(float speed_mms) const;
   static float NormalizeAngle(float angle);
 
-  static constexpr int kNumWheels = 2;
-  Tb6612Motor* motors_[kNumWheels];
+  static constexpr int kNumWheels = 4;
+  At8236Motor* motors_[kNumWheels];
   QuadratureEncoder* encs_[kNumWheels];
   PidController pid_vel_[kNumWheels];
-  
+
   float target_vel_[kNumWheels] = {0};
   float final_target_vel_[kNumWheels] = {0};
+  int16_t direct_pwm_[kNumWheels] = {0};
   int32_t last_count_[kNumWheels] = {0};
   float filtered_rpm_[kNumWheels] = {0};
-
   ControlMode control_mode_ = ControlMode::kVelocity;
-
-  PidController pid_pos_x_;
-  PidController pid_pos_y_;
-  PidController pid_pos_yaw_;
+  ChassisType chassis_type_ = ChassisType::kDifferential;
+  DifferentialKinematics differential_kinematics_;
+  MecanumKinematics mecanum_kinematics_;
+  const MotionKinematics* kinematics_ = &differential_kinematics_;
 
   float pos_x_ = 0.0f, pos_y_ = 0.0f, odom_yaw_ = 0.0f;
   float imu_yaw_rel_ = 0.0f;
   float total_distance_ = 0.0f; // 新增：累计轨迹路程(包含曲线)
-  float target_pos_x_ = 0.0f, target_pos_y_ = 0.0f, target_pos_yaw_ = 0.0f;
   float yaw_offset_ = 0.0f;
   bool need_reset_yaw_offset_ = true;
 
-  SeqState seq_state_ = SeqState::kIdle;
-  float seq_target_dist_ = 0.0f, seq_target_angle_ = 0.0f;
-  float seq_start_x_ = 0.0f, seq_start_y_ = 0.0f, seq_start_imu_yaw_ = 0.0f;
-
-  float max_accel_rpm_s_ = 200.0f; 
-  int seq_stable_count_ = 0; 
-  int settle_count_ = 0;     
+  float max_accel_rpm_s_ = 200.0f;
 };
 
 #endif // MOTION_CONTROLLER_H_

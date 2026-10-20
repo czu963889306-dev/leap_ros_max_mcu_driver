@@ -2,7 +2,7 @@
 #include "app_runtime.h"
 #include "board.h"
 #include "wifi_app.h"
-#include "msg/servo_msg.h"
+#include "msg/rgb_msg.h"
 #include "msg/temperature_msg.h"
 
 #include "driver/temperature_sensor.h"
@@ -10,11 +10,27 @@
 #include "esp_log.h"
 
 static const char *TAG = "PERIPHERAL";
+static const TickType_t kCommModeToggleMinTicks = pdMS_TO_TICKS(50);
+static const TickType_t kCommModeToggleMaxTicks = pdMS_TO_TICKS(1200);
 static const TickType_t kBootWifiResetLongPressTicks = pdMS_TO_TICKS(3000);
 static const TickType_t kTemperatureSampleTicks = pdMS_TO_TICKS(1000);
 
+static void toggle_wifi_comm_mode() {
+    system_globals().runtime.wifi_comm_mode = SystemGlobals::NextWifiCommMode(system_globals().runtime.wifi_comm_mode);
+    const esp_err_t err = wifi_app().SaveCommMode(static_cast<WifiCommMode>(system_globals().runtime.wifi_comm_mode));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to persist Wi-Fi communication mode: %s", esp_err_to_name(err));
+    }
+
+    status_led.SetMode(system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRos
+        ? StatusLedMode::kSlowBlink
+        : StatusLedMode::kOn);
+    ESP_LOGI(TAG, "Wi-Fi communication mode switched to %s",
+             SystemGlobals::WifiCommModeToDisplayName(system_globals().runtime.wifi_comm_mode));
+}
+
 static bool clear_wifi_for_provisioning() {
-    const esp_err_t err = wifi_clear_sta_credentials();
+    const esp_err_t err = wifi_app().ClearStaCredentials();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to clear Wi-Fi credentials: %s", esp_err_to_name(err));
         return false;
@@ -46,7 +62,7 @@ static temperature_sensor_handle_t init_temperature_sensor() {
 }
 
 static void sample_temperature_sensor(temperature_sensor_handle_t sensor) {
-    if (sensor == nullptr || q_temperature_state == nullptr) {
+    if (sensor == nullptr || system_globals().queues.temperature_state == nullptr) {
         return;
     }
 
@@ -56,23 +72,24 @@ static void sample_temperature_sensor(temperature_sensor_handle_t sensor) {
     if (!msg.valid) {
         ESP_LOGW(TAG, "Failed to read internal temperature: %s", esp_err_to_name(err));
     }
-    xQueueOverwrite(q_temperature_state, &msg);
+    xQueueOverwrite(system_globals().queues.temperature_state, &msg);
 }
 
 void peripheral_task(void *p) {
-    ServoMsg servo_cmd = {45.0f};
+    RgbMsg rgb_cmd = {0, 255, 0};
     TickType_t press_start_tick = 0;
     TickType_t last_temperature_sample_tick = 0;
     bool wifi_reset_requested = false;
     temperature_sensor_handle_t temperature_sensor = init_temperature_sensor();
 
-    my_servo.SetAngle(servo_cmd.angle);
-    
-    while (1) {
-        if (xQueueReceive(q_servo_cmd, &servo_cmd, 0) == pdTRUE) {
-            my_servo.SetAngle(servo_cmd.angle);
-        }
 
+    while (1) {
+        if (xQueueReceive(system_globals().queues.rgb_cmd, &rgb_cmd, 0) == pdTRUE) {
+            for (int i = 0; i < 6; i++) {
+                rgb_led.SetPixel(i, rgb_cmd.r, rgb_cmd.g, rgb_cmd.b);
+            }
+            rgb_led.Refresh();
+        }
         const TickType_t now = xTaskGetTickCount();
         if ((now - last_temperature_sample_tick) >= kTemperatureSampleTicks) {
             last_temperature_sample_tick = now;
@@ -88,9 +105,14 @@ void peripheral_task(void *p) {
                 press_start_tick = now;
                 wifi_reset_requested = false;
             } else {
+                const TickType_t held_ticks = now - press_start_tick;
                 if (wifi_reset_requested) {
                     ESP_LOGW(TAG, "Restarting after BOOT Wi-Fi reset.");
                     app_runtime_restart_after_delay_ms(200);
+                } else if (press_start_tick != 0 &&
+                    held_ticks >= kCommModeToggleMinTicks &&
+                    held_ticks <= kCommModeToggleMaxTicks) {
+                    toggle_wifi_comm_mode();
                 }
                 press_start_tick = 0;
                 wifi_reset_requested = false;

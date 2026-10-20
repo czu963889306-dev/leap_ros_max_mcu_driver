@@ -41,7 +41,7 @@ void Lsm6ds3Imu::CalibrateGyro() {
       int16_t gz = (buffer[5] << 8) | buffer[4];
 
       // ±250 dps -> 8.75 mdps/LSB
-      sum_gx += gx * 8.75f / 1000.0f; 
+      sum_gx += gx * 8.75f / 1000.0f;
       sum_gy += gy * 8.75f / 1000.0f;
       sum_gz += gz * 8.75f / 1000.0f;
     }
@@ -52,7 +52,7 @@ void Lsm6ds3Imu::CalibrateGyro() {
   gyro_bias_y_ = sum_gy / kSamples;
   gyro_bias_z_ = sum_gz / kSamples;
 
-  ESP_LOGI(TAG, "Calibration Done! Bias: X=%.3f, Y=%.3f, Z=%.3f", 
+  ESP_LOGI(TAG, "Calibration Done! Bias: X=%.3f, Y=%.3f, Z=%.3f",
            gyro_bias_x_, gyro_bias_y_, gyro_bias_z_);
 }
 // ---------------------------------------------------------
@@ -66,9 +66,9 @@ bool Lsm6ds3Imu::Init() {
   conf.sda_pullup_en = true;
   conf.scl_pullup_en = true;
   conf.master.clk_speed = 400000;
-  
+
   ESP_ERROR_CHECK(i2c_param_config(port_, &conf));
-  
+
   // 忽略 ESP_ERR_INVALID_STATE 防止其他外设已经注册过该 I2C 端口导致崩溃
   esp_err_t err = i2c_driver_install(port_, conf.mode, 0, 0, 0);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
@@ -86,7 +86,7 @@ bool Lsm6ds3Imu::Init() {
   // 初始化陀螺仪和加速度计配置
   WriteRegister8(kRegCtrl1Xl, 0x40); // 加速度计：104Hz, ±2g
   // 【重要修改】：量程从 ±500dps 降至 ±250dps (0x40)，提升低速旋转时的分辨率
-  WriteRegister8(kRegCtrl2G, 0x40);  
+  WriteRegister8(kRegCtrl2G, 0x40);
   WriteRegister8(kRegCtrl3C, 0x04);  // BDU=1, 地址自动递增
 
   // 执行上电零偏校准 (耗时约 3 秒)
@@ -97,7 +97,7 @@ bool Lsm6ds3Imu::Init() {
   pitch_ = 0.0f;
   yaw_ = 0.0f;
   last_us_ = esp_timer_get_time();
-  
+
   ESP_LOGI(TAG, "LSM6DS3 Initialized Successfully");
   return true;
 }
@@ -117,12 +117,12 @@ esp_err_t Lsm6ds3Imu::Update() {
   int16_t az = (buffer[11] << 8) | buffer[10];
 
   // 【重要修改】：转换为物理单位 (±250dps -> 8.75mdps/LSB) 并减去校准零偏
-  gyro_x_ = (gx * 8.75f / 1000.0f) - gyro_bias_x_;  
+  gyro_x_ = (gx * 8.75f / 1000.0f) - gyro_bias_x_;
   gyro_y_ = (gy * 8.75f / 1000.0f) - gyro_bias_y_;
   gyro_z_ = (gz * 8.75f / 1000.0f) - gyro_bias_z_;
 
   // 【重要修改】：引入死区，如果角速度极小 (<0.2 dps)，则视为未旋转，防止底噪被积分
-  constexpr float kGyroDeadzone = 0.2f; 
+  constexpr float kGyroDeadzone = 0.2f;
   if (std::abs(gyro_x_) < kGyroDeadzone) gyro_x_ = 0.0f;
   if (std::abs(gyro_y_) < kGyroDeadzone) gyro_y_ = 0.0f;
   if (std::abs(gyro_z_) < kGyroDeadzone) gyro_z_ = 0.0f;
@@ -142,7 +142,7 @@ esp_err_t Lsm6ds3Imu::Update() {
 
   // -------- 互补滤波算法 --------
   constexpr float kAlpha = 0.95f; // 信任陀螺仪的比例
-  
+
   roll_  = kAlpha * (roll_  + gyro_x_ * dt) + (1.0f - kAlpha) * roll_acc;
   pitch_ = kAlpha * (pitch_ + gyro_y_ * dt) + (1.0f - kAlpha) * pitch_acc;
   yaw_  += gyro_z_ * dt;
@@ -150,9 +150,9 @@ esp_err_t Lsm6ds3Imu::Update() {
   // 限制 Yaw 角在 [-180, 180] 之间
   if (yaw_ > 180.0f) yaw_ -= 360.0f;
   if (yaw_ < -180.0f) yaw_ += 360.0f;
-  
-  // 1. 将角度转换为弧度，并除以 2 
-  constexpr float kDegToRadHalf = 0.01745329252f * 0.5f; 
+
+  // 1. 将角度转换为弧度，并除以 2
+  constexpr float kDegToRadHalf = 0.01745329252f * 0.5f;
   float cy = std::cos(yaw_ * kDegToRadHalf);
   float sy = std::sin(yaw_ * kDegToRadHalf);
   float cp = std::cos(pitch_ * kDegToRadHalf);
@@ -197,7 +197,7 @@ esp_err_t Lsm6ds3Imu::ReadRegisters(uint8_t reg, uint8_t *data, size_t len) {
   i2c_master_start(cmd);
   i2c_master_write_byte(cmd, (kLsm6ds3Addr << 1) | I2C_MASTER_WRITE, true);
   i2c_master_write_byte(cmd, reg, true);
-  
+
   i2c_master_start(cmd);
   i2c_master_write_byte(cmd, (kLsm6ds3Addr << 1) | I2C_MASTER_READ, true);
   if (len > 1) {
@@ -205,7 +205,7 @@ esp_err_t Lsm6ds3Imu::ReadRegisters(uint8_t reg, uint8_t *data, size_t len) {
   }
   i2c_master_read_byte(cmd, data + len - 1, I2C_MASTER_NACK);
   i2c_master_stop(cmd);
-  
+
   esp_err_t ret = i2c_master_cmd_begin(port_, cmd, pdMS_TO_TICKS(50));
   i2c_cmd_link_delete(cmd);
   shared_i2c_bus_lock_give();

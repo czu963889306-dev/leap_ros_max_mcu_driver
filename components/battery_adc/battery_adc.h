@@ -18,7 +18,8 @@ struct BatteryAdcReading {
 
 class BatteryAdc {
  public:
-  BatteryAdc(adc_unit_t unit, adc_channel_t channel);
+  BatteryAdc(adc_unit_t unit, adc_channel_t channel, float divider_ratio,
+             float empty_voltage_v, float full_voltage_v);
 
   esp_err_t Init();
   BatteryAdcReading Read();
@@ -28,10 +29,12 @@ class BatteryAdc {
 
   adc_unit_t unit_;
   adc_channel_t channel_;
+  float divider_ratio_;
+  float empty_voltage_v_;
+  float full_voltage_v_;
   adc_oneshot_unit_handle_t unit_handle_;
   adc_cali_handle_t cali_handle_;
   bool initialized_;
-  bool calibrated_;
 };
 
 #endif  // BATTERY_ADC_H_
