@@ -7,7 +7,6 @@
 #include <string.h>
 
 static const char* TAG = "LIDAR_TASK";
-static constexpr uint16_t kInvalidObstacleDistanceMm = 100;
 namespace board_cfg = leap_config::board;
 namespace net_cfg = leap_config::network;
 
@@ -40,8 +39,7 @@ void lidar_task(void *p) {
                 // ROS 角度逆时针为正：原有 180° 偏置减去 90°，保留方向镜像。
                 angle = (90 - angle + 360) % 360;
 
-                // 10 cm 以内的障碍物视为无效点，不写入扫描数据。
-                if (dist > kInvalidObstacleDistanceMm) {
+                if (dist > 0) {
                     if (lidar_msg.distances[angle] == 0 ||
                         dist < lidar_msg.distances[angle]) {
                         lidar_msg.distances[angle] = dist;

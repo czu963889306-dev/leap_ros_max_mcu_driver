@@ -42,6 +42,11 @@ static constexpr float kLaserRangeMaxM = 12.0f;
 static constexpr int kInitialAgentPingTimeoutMs = 300;
 static constexpr uint8_t kInitialAgentPingAttempts = 3;
 static constexpr int kTimeSyncTimeoutMs = 1000;
+// Bound runtime synchronization waits.
+static constexpr int kTimeSyncRuntimeTimeoutMs = 50;
+static constexpr uint32_t kTimeSyncRetryIntervalMs = 1000;
+static constexpr uint32_t kTimeSyncIntervalMs = 5000;
+static constexpr uint32_t kTimeSyncMaxAgeMs = 30000;
 
 }  // namespace ros
 }  // namespace leap_config

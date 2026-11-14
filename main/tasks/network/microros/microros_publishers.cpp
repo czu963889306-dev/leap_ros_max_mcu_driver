@@ -1,4 +1,5 @@
 #include "microros_internal.h"
+#include "microros_time_sync.h"
 
 #include <math.h>
 #include <string.h>
@@ -9,7 +10,6 @@
 #include "msg/imu_msg.h"
 #include "msg/lidar_msg.h"
 #include "msg/motion_msg.h"
-#include "rmw_microros/rmw_microros.h"
 #include "system_globals.h"
 #include "wifi_app.h"
 
@@ -207,15 +207,18 @@ void publish_state_timer(rcl_timer_t *timer, int64_t) {
         return;
     }
 
-    const int64_t stamp_ms = rmw_uros_epoch_millis();
-    publish_odom(stamp_ms);
-    publish_imu(stamp_ms);
+    ++s_publish_tick;
+    int64_t stamp_ms = 0;
+    if (get_synced_stamp_ms(stamp_ms)) {
+        publish_odom(stamp_ms);
+        publish_imu(stamp_ms);
 
-    if ((++s_publish_tick % ros_cfg::kScanPublishDivider) == 0) {
-        publish_scan(stamp_ms);
-    }
-    if ((s_publish_tick % ros_cfg::kBatteryPublishDivider) == 0) {
-        publish_battery(stamp_ms);
+        if ((s_publish_tick % ros_cfg::kScanPublishDivider) == 0) {
+            publish_scan(stamp_ms);
+        }
+        if ((s_publish_tick % ros_cfg::kBatteryPublishDivider) == 0) {
+            publish_battery(stamp_ms);
+        }
     }
     if ((s_publish_tick % ros_cfg::kWifiConfigPublishTicks) == 0) {
         publish_wifi_config();

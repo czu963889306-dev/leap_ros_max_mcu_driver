@@ -18,7 +18,7 @@ firmware falls back to the default micro-ROS UART configuration.
 
 UDP uses the runtime agent address, default `192.168.31.214:8888`. UART uses
 UART0, GPIO43 TX, GPIO44 RX, 921600 baud, 8N1, without hardware flow control.
-In UART mode, the micro-ROS task waits 5 seconds before initializing UART0 and
+In UART mode, the micro-ROS task waits 8 seconds before initializing UART0 and
 connecting to the agent, leaving time for startup Wi-Fi/IP console logs.
 UDP starts after Wi-Fi STA connects. Neither transport requires a separate host
 handshake or heartbeat gate.
@@ -125,6 +125,35 @@ navigation command.
 | `/battery_state` | `sensor_msgs/msg/BatteryState` | 2 Hz | `battery` | Pack voltage in V and estimated percentage in 0..1 |
 | `/wifi_config` | `std_msgs/msg/String` | 1 Hz | n/a | Saved STA credentials as JSON: `{"ssid":"<name>","password":"<password>"}` |
 
+### Timestamp Synchronization
+
+Both transports synchronize the MCU clock offset against the micro-ROS Agent.
+The first attempt after creating a session has a 1000 ms timeout. Failed attempts
+are retried 1000 ms after completion; successful synchronization is refreshed
+every 5000 ms. Runtime attempts use a 50 ms timeout to limit interruptions to
+command processing. Scheduling uses the MCU's monotonic uptime.
+
+`/odom`, `/imu`, `/scan`, and `/battery_state` are published only after a
+successful synchronization in the current session. A failed refresh retains the
+last confirmed mapping for up to 30000 ms; older mappings pause these topics.
+If a clock correction moves time backward, publication pauses until the corrected
+time passes the last published timestamp.
+Session teardown clears the application's synchronization state. `/wifi_config`,
+subscriptions, and services continue while timestamped publishers are paused.
+
+`header.stamp` is publication time derived from the last synchronized Agent
+epoch and monotonic MCU time, with millisecond precision. Sensor queues do not carry acquisition
+timestamps. The Agent host's system clock is the time reference; ROS simulated
+time (`/clock`) is not synchronized by this mechanism.
+
+Host regression tests (no ESP32 or Agent required):
+
+```bash
+cmake -S tests -B /tmp/leap-max-time-sync-tests
+cmake --build /tmp/leap-max-time-sync-tests
+ctest --test-dir /tmp/leap-max-time-sync-tests --output-on-failure
+```
+
 ### Lidar Angle Mapping
 
 All scan angles are enabled; no angular sector is masked. Viewed from above,
@@ -132,8 +161,8 @@ the lidar mounting has rotated 90 degrees clockwise relative to the previous
 installation. The firmware maps raw angles to scan bins with
 `(90 - raw_angle_deg + 360) % 360`, retaining the conversion to counter-clockwise
 positive angles. Bins 0, 90, 180, and 270 correspond to forward, left, rear, and
-right. The existing distance filter still excludes returns at or below 100 mm;
-when multiple valid returns occupy one bin, the nearest return is kept.
+right. Nonzero returns are retained at any distance; when multiple returns
+occupy one bin, the nearest return is kept.
 
 ### Battery Measurement
 

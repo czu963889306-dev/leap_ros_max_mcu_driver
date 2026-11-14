@@ -1,5 +1,6 @@
 #include "microros_internal.h"
 #include "microros_runtime.h"
+#include "microros_time_sync.h"
 
 #include "esp_log.h"
 #include "geometry_msgs/msg/twist.h"
@@ -11,7 +12,6 @@
 #include "rmw_microxrcedds_c/config.h"
 #include "rmw_microros/ping.h"
 #include "rmw_microros/rmw_microros.h"
-#include "rmw_microros/time_sync.h"
 #include "rosidl_runtime_c/primitives_sequence_functions.h"
 #include "rosidl_runtime_c/string_functions.h"
 #include "sensor_msgs/msg/imu.h"
@@ -115,9 +115,7 @@ bool init_context() {
     MICROROS_RCCHECK(rcl_init(0, nullptr, &s_init_options, &s_context));
     s_context_initialized = true;
 
-    if (!rmw_uros_epoch_synchronized()) {
-        (void)rmw_uros_sync_session(ros_cfg::kTimeSyncTimeoutMs);
-    }
+    update_time_sync(ros_cfg::kTimeSyncTimeoutMs);
     return true;
 }
 
@@ -280,6 +278,7 @@ bool init_timer_and_wait_set() {
 }
 
 bool create_ros_entities() {
+    reset_time_sync();
     s_publish_tick = 0;
     reset_ros_handles();
     reset_host_info_state();
@@ -299,6 +298,7 @@ bool create_ros_entities() {
 }
 
 void destroy_ros_entities() {
+    reset_time_sync();
     if (!s_ros_created &&
         !s_strings_initialized &&
         !s_scan_ranges_initialized &&
@@ -518,6 +518,7 @@ void microros_runtime_loop(void) {
                     continue;
                 }
             }
+            update_time_sync(ros_cfg::kTimeSyncRuntimeTimeoutMs);
             if (!spin_once(20)) {
                 ESP_LOGW(kTag, "micro-ROS transport stopped; recreating session");
                 destroy_ros_entities();

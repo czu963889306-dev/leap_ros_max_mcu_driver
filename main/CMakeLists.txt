@@ -21,6 +21,7 @@ set(APP_SRCS
     "tasks/network/microros/microros_subscribers.cpp"
     "tasks/network/microros/microros_services.cpp"
     "tasks/network/microros/microros_publishers.cpp"
+    "tasks/network/microros/microros_time_sync.cpp"
     "tasks/network/microros/microros_runtime.cpp"
     "tasks/network/microros/microros_task.cpp"
     "network/wifi_app.cpp"
